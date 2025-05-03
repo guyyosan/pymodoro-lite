@@ -1,10 +1,10 @@
 # Pymodoro Lite
+
 A lightweight Pomodoro timer application built with PySide6.
 Q: Why make another timer?
 A: I wanted something that's small and stays on top so I can see it while working.
 
-![Pymodoro Lite Preview](preview.jpg)
-
+![Pymodoro Lite Preview](preview.JPG)
 
 ## Features
 
