@@ -1,6 +1,6 @@
 import sys
 import time
-from PySide6.QtCore import QTimer, Qt, QUrl, QPoint
+from PySide6.QtCore import QTimer, Qt, QUrl, QPoint, QEvent
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,6 +14,29 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QIcon
 import os
+import ctypes
+
+# Windows API constants for setting window on top
+HWND_TOPMOST = -1
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
+SWP_NOZORDER = 0x0004
+SWP_NOOWNERZORDER = 0x0200
+GWL_EXSTYLE = -20
+WS_EX_TOPMOST = 0x00000008
+WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_APPWINDOW = 0x00040000
+
+# ShowWindow commands
+SW_SHOW = 5
+SW_SHOWNA = 8
+
+# For Windows-specific handling
+if sys.platform == "win32":
+    user32 = ctypes.windll.user32
 
 
 class ClickableButton(QPushButton):
@@ -35,11 +58,28 @@ class PomodoroTimer(QMainWindow):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.Tool, True)
-        # self.setWindowFlags(
-        #     Qt.FramelessWindowHint  # Remove window frame
-        #     | Qt.WindowStaysOnTopHint  # Always on top
-        #     | Qt.Tool  # Remove from taskbar
-        # )
+        self.setWindowFlag(
+            Qt.WindowType.BypassWindowManagerHint, True
+        )  # Bypass window manager
+        self.setWindowFlag(
+            Qt.WindowType.X11BypassWindowManagerHint, True
+        )  # X11 specific bypass
+        # Force the window to stay visible even on "Show Desktop" actions
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        # Set the window to be persistently on top
+        self.setWindowOpacity(0.98)  # Slight opacity change to force topmost rendering
+        # Create an event filter to capture global events
+        app = QApplication.instance()
+        app.installEventFilter(self)
+        # Windows-specific "always on top" timer
+        self.topmost_timer = QTimer()
+        self.topmost_timer.timeout.connect(self.ensure_topmost)
+        self.topmost_timer.start(500)  # Check every 500ms
+        # Additional timer to keep checking visibility
+        self.visibility_timer = QTimer()
+        self.visibility_timer.timeout.connect(self.ensure_visibility)
+        self.visibility_timer.start(100)  # Check visibility more frequently
+
         self.setFixedSize(200, 39)  # 5px shorter window
 
         self.setStyleSheet(
@@ -176,11 +216,12 @@ class PomodoroTimer(QMainWindow):
         self.setCentralWidget(container)
 
     def showEvent(self, event):
-        """Position the window in the bottom right corner when shown"""
+        """Position the window in the bottom right corner when shown and ensure topmost state"""
         screen = QApplication.primaryScreen().geometry()
         x = screen.width() - self.width() - 200  # 200px padding from right
         y = screen.height() - self.height()
         self.move(QPoint(x, y))
+        self.ensure_topmost()  # Make sure we're topmost when shown
         super().showEvent(event)
 
     def format_time(self, seconds):
@@ -238,6 +279,61 @@ class PomodoroTimer(QMainWindow):
             self.pause_timer()
         else:
             self.start_timer()
+
+    def ensure_topmost(self):
+        """Windows-specific function to ensure the window stays topmost"""
+        if sys.platform == "win32":
+            # Get window handle
+            hwnd = int(self.winId())
+
+            # Set extended window style to include TOPMOST and NOACTIVATE
+            exstyle = user32.GetWindowLongA(hwnd, GWL_EXSTYLE)
+            user32.SetWindowLongA(
+                hwnd,
+                GWL_EXSTYLE,
+                exstyle | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            )
+
+            # Set window to be topmost with more aggressive flags
+            user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+
+            # Make sure the window is visible
+            user32.ShowWindow(hwnd, SW_SHOWNA)
+
+    def ensure_visibility(self):
+        """Ensure the window is visible even after Show Desktop (Win+D)"""
+        if not self.isVisible() and self.running:
+            self.show()
+            self.ensure_topmost()
+
+    def eventFilter(self, obj, event):
+        """Global event filter to catch desktop state changes"""
+        # For any desktop state change events, ensure our window stays visible
+        if event.type() == QEvent.ApplicationStateChange:
+            self.ensure_topmost()
+        return super().eventFilter(obj, event)
+
+    def focusOutEvent(self, event):
+        """Ensure topmost when focus is lost"""
+        self.ensure_topmost()
+        super().focusOutEvent(event)
+
+    def changeEvent(self, event):
+        """Handle window state changes"""
+        if event.type() == QEvent.WindowStateChange:
+            # Force the window to be visible if minimized
+            if self.windowState() & Qt.WindowState.Minimized:
+                self.setWindowState(self.windowState() & ~Qt.WindowState.Minimized)
+                self.ensure_topmost()
+        super().changeEvent(event)
 
 
 if __name__ == "__main__":

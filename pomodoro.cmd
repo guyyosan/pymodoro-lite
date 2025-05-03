@@ -1,1 +1,1 @@
-START "" C:\Users\guyma\Desktop\n8n\.venv\Scripts\python.exe C:\Users\guyma\Desktop\n8n\pomodoro_timer.py
+C:\Users\guyma\Desktop\pymodoro-lite\.venv\Scripts\python.exe C:\Users\guyma\Desktop\pymodoro-lite\pomodoro_timer.py
